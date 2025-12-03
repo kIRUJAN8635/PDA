@@ -17,7 +17,7 @@ st.set_page_config(layout='wide', page_title="AQI Predictor and Analyzer")
 
 # --- 1. Load Pre-trained Assets (if available) ---
 # Pretrained models expected filenames
-BASE_PATH = '/content/drive/MyDrive//programing_data_analysis/'
+BASE_PATH = '/content/drive/MyDrive/programing_data_analysis/'
 RF_MODEL_FILE = BASE_PATH + 'random_forest_model.joblib'
 KNN_MODEL_FILE = BASE_PATH + 'knn_model.joblib'
 SCALER_FILE = BASE_PATH + 'scaler.joblib'
