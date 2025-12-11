@@ -1,4 +1,3 @@
-%%writefile app.py
 import os
 import io
 import joblib
@@ -29,8 +28,7 @@ st.title("AQI Predictor and Analyzer")
 # Configuration / Paths
 # -------------------------
 # *** CRITICAL FIX: Using a portable relative path 'assets/' ***
-# This path assumes your models and preprocessors will be saved 
-# in an 'assets' folder relative to where app.py is run.
+# This path ensures models are saved/loaded relative to the app.py location
 BASE_PATH = 'assets/' 
 
 if not BASE_PATH.endswith('/'):
@@ -67,12 +65,13 @@ def load_csv_from_path(path):
 
 def ensure_dir(path):
     """Ensures the directory for a given path exists."""
+    # os.path.dirname(path) gets the directory part (e.g., 'assets/')
     d = os.path.dirname(path)
     if d and not os.path.exists(d):
         os.makedirs(d, exist_ok=True)
 
 
-# Helper for Model Download (From your screenshot)
+# Helper for Model Download
 def get_joblib_download_link(model_object, filename, label="Download Model"):
     """
     Helper to convert a joblib model object to bytes and create a Streamlit download button.
@@ -289,8 +288,7 @@ if dt_classifier is None or train_full_models:
         joblib.dump(dt_classifier, DT_MODEL_FILE)
         st.sidebar.success('Decision Tree trained and saved.')
     except Exception as e:
-        # The base path is relative now, so this error usually means file permissions 
-        # or the environment doesn't allow file saving (e.g., read-only deployment).
+        # The path is relative now, so this error usually means permissions issue if not running locally
         st.sidebar.error(f'Failed to train Decision Tree and save the model: {e}. Check if the directory "{BASE_PATH}" is writeable.')
 
 if (rf_classifier is None or knn_classifier is None) and train_full_models:
@@ -838,9 +836,6 @@ elif page == 'Model Visualization':
             
             ax_dt.set_title(f'Decision Tree Classifier (Max Depth: {selected_depth})', fontsize=20)
             
-
-[Image of decision tree structure]
-
             
             st.pyplot(fig_dt)
             st.markdown('---')
