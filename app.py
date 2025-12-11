@@ -1,3 +1,4 @@
+%%writefile app.py
 import os
 import io
 import joblib
@@ -19,13 +20,6 @@ import math
 # -------------------------
 # Streamlit: AQI Predictor
 # -------------------------
-# Features:
-# - File uploader (or fallback to BASE_PATH CSV)
-# - Robust safe-loading and saving of joblib assets
-# - Train Decision Tree if missing; optional train all models
-# - EDA pages with detailed plots
-# - MODELING PAGE: Modified to show Classification Report and Confusion Matrix for all models.
-# - Download buttons for models and preprocessors.
 
 # Configure Streamlit
 st.set_page_config(layout='wide', page_title="AQI Predictor and Analyzer")
@@ -34,9 +28,11 @@ st.title("AQI Predictor and Analyzer")
 # -------------------------
 # Configuration / Paths
 # -------------------------
-# IMPORTANT: This path is for demonstration and expected environment setup.
-# In a local environment, you may need to adjust BASE_PATH if joblib files are not saved.
-BASE_PATH = '/content/drive/MyDrive/programing_data_analysis/'
+# *** CRITICAL FIX: Using a portable relative path 'assets/' ***
+# This path assumes your models and preprocessors will be saved 
+# in an 'assets' folder relative to where app.py is run.
+BASE_PATH = 'assets/' 
+
 if not BASE_PATH.endswith('/'):
     BASE_PATH += '/'
 
@@ -76,6 +72,25 @@ def ensure_dir(path):
         os.makedirs(d, exist_ok=True)
 
 
+# Helper for Model Download (From your screenshot)
+def get_joblib_download_link(model_object, filename, label="Download Model"):
+    """
+    Helper to convert a joblib model object to bytes and create a Streamlit download button.
+    """
+    buffer = io.BytesIO()
+    joblib.dump(model_object, buffer)
+    buffer.seek(0)
+    
+    # Create the download button
+    return st.download_button(
+        label=label,
+        data=buffer.getvalue(),
+        file_name=filename,
+        mime="application/octet-stream",
+        key=f'download_{filename}'
+    )
+
+
 # -------------------------
 # Upload or load dataset
 # -------------------------
@@ -95,9 +110,10 @@ if uploaded_file is not None:
         st.stop()
 else:
     # fallback to default path
+    # NOTE: The CSV must be accessible at BASE_PATH + 'all_cities_combined.csv'
     df_display = load_csv_from_path(BASE_PATH + 'all_cities_combined.csv')
     if df_display is None:
-        st.sidebar.warning('No uploaded file and default CSV not found at BASE_PATH. Use the uploader or place your CSV at BASE_PATH.')
+        st.sidebar.warning(f'No uploaded file and default CSV not found at BASE_PATH: {BASE_PATH}. Use the uploader or place your CSV.')
         st.stop()
     else:
         st.sidebar.info(f'Loaded dataset from {BASE_PATH}all_cities_combined.csv')
@@ -269,16 +285,20 @@ if dt_classifier is None or train_full_models:
     dt_classifier = DecisionTreeClassifier(random_state=42)
     try:
         dt_classifier.fit(X_train_app, y_train_app)
+        ensure_dir(DT_MODEL_FILE)
         joblib.dump(dt_classifier, DT_MODEL_FILE)
         st.sidebar.success('Decision Tree trained and saved.')
     except Exception as e:
-        st.sidebar.error(f'Failed to train Decision Tree: {e}')
+        # The base path is relative now, so this error usually means file permissions 
+        # or the environment doesn't allow file saving (e.g., read-only deployment).
+        st.sidebar.error(f'Failed to train Decision Tree and save the model: {e}. Check if the directory "{BASE_PATH}" is writeable.')
 
 if (rf_classifier is None or knn_classifier is None) and train_full_models:
     # Train Random Forest and KNN as optional
     try:
         rf_classifier = RandomForestClassifier(n_estimators=100, random_state=42)
         rf_classifier.fit(X_train_app, y_train_app)
+        ensure_dir(RF_MODEL_FILE)
         joblib.dump(rf_classifier, RF_MODEL_FILE)
         st.sidebar.success('Random Forest trained and saved.')
     except Exception as e:
@@ -287,16 +307,55 @@ if (rf_classifier is None or knn_classifier is None) and train_full_models:
     try:
         knn_classifier = KNeighborsClassifier(n_neighbors=5)
         knn_classifier.fit(X_train_app, y_train_app)
+        ensure_dir(KNN_MODEL_FILE)
         joblib.dump(knn_classifier, KNN_MODEL_FILE)
         st.sidebar.success('KNN trained and saved.')
     except Exception as e:
         st.sidebar.warning(f'KNN training failed: {e}')
 
+# -------------------------
+# Asset Download Section
+# -------------------------
+st.sidebar.markdown('---')
+st.sidebar.subheader('Download Assets')
+
+with st.sidebar.expander("Download Preprocessors"):
+    if scaler:
+        get_joblib_download_link(scaler, os.path.basename(SCALER_FILE), label="Download Scaler")
+    else:
+        st.caption("Scaler not loaded.")
+        
+    if city_label_encoder:
+        get_joblib_download_link(city_label_encoder, os.path.basename(CITY_LE_FILE), label="Download City Encoder")
+    else:
+        st.caption("City Encoder not loaded.")
+        
+    if aqi_bucket_label_encoder:
+        get_joblib_download_link(aqi_bucket_label_encoder, os.path.basename(AQI_LE_FILE), label="Download AQI Encoder")
+    else:
+        st.caption("AQI Encoder not loaded.")
+
+with st.sidebar.expander("Download Trained Models"):
+    if dt_classifier:
+        get_joblib_download_link(dt_classifier, os.path.basename(DT_MODEL_FILE), label="Download Decision Tree")
+    else:
+        st.caption("Decision Tree not loaded.")
+        
+    if rf_classifier:
+        get_joblib_download_link(rf_classifier, os.path.basename(RF_MODEL_FILE), label="Download Random Forest")
+    else:
+        st.caption("Random Forest not loaded.")
+        
+    if knn_classifier:
+        get_joblib_download_link(knn_classifier, os.path.basename(KNN_MODEL_FILE), label="Download KNN")
+    else:
+        st.caption("KNN not loaded.")
+
 
 # -------------------------
 # Multipage style navigation
 # -------------------------
-page = st.sidebar.radio('Go to', ['Data Overview', 'Exploratory Data Analysis', 'Exploratory Data Analysis 2', 'Modelling and Prediction'])
+page = st.sidebar.radio('Go to', ['Data Overview', 'Exploratory Data Analysis', 'Exploratory Data Analysis 2', 'Modelling and Prediction', 'Model Visualization'])
 
 if page == 'Data Overview':
     st.header('Data Overview')
@@ -325,22 +384,20 @@ if page == 'Data Overview':
 elif page == 'Exploratory Data Analysis':
     st.header('Exploratory Data Analysis 📊')
 
-    # Calculate necessary variables once for the whole EDA section
     if 'AQI' in df_display.columns:
         sorted_mean_aqi = df_display.groupby('City')['AQI'].mean().sort_values(ascending=False)
     else:
         sorted_mean_aqi = pd.Series()
-    
+
     num_df = df_display.select_dtypes(include=['number']).copy()
     if num_df.shape[1] > 1:
         corr_matrix = num_df.corr()
     else:
         corr_matrix = pd.DataFrame()
-    
-    # --- EDA Sub-Navigator ---
+
     eda_sub_page = st.selectbox(
-        'Select EDA View', 
-        ['Overview & Trends', 'Detailed Distributions & Correlations'], 
+        'Select EDA View',
+        ['Overview & Trends', 'Detailed Distributions & Correlations'],
         key='eda_sub_nav'
     )
 
@@ -385,7 +442,7 @@ elif page == 'Exploratory Data Analysis':
             mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
             sns.heatmap(corr_matrix, mask=mask, annot=True, fmt='.2f', ax=ax3, cmap='viridis')
             st.pyplot(fig3)
-        
+
         # Distribution of Categorical Features
         st.subheader('Distribution of Categorical Features')
         categorical_cols = df_display.select_dtypes(include='object').columns.tolist()
@@ -396,34 +453,30 @@ elif page == 'Exploratory Data Analysis':
             fig_height = 6
 
             fig_cat, axes_cat = plt.subplots(1, n_cols, figsize=(fig_width, fig_height))
-            
+
             if n_cols == 1:
                 axes_cat = [axes_cat]
 
             for i, col in enumerate(categorical_cols):
                 ax = axes_cat[i]
-                sns.countplot(x=df_display[col], ax=ax, palette='viridis') 
+                sns.countplot(x=df_display[col], ax=ax, palette='viridis')
                 ax.set_title(f'Distribution of {col}', fontsize=14)
                 ax.set_xlabel(col)
                 ax.set_ylabel('Count')
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-            
+
             plt.tight_layout()
             st.pyplot(fig_cat)
-        
+
     elif eda_sub_page == 'Detailed Distributions & Correlations':
         st.subheader('Detailed Distributions of Key Pollutants')
-        
-        # 1. Histograms for specific pollutants
+
         cols_hist = ['PM2.5','PM10','NO2','NOx','NH3', 'CO','SO2','O3','Benzene','Toluene','Xylene']
-        
-        # Filter for only existing columns
         cols_hist = [c for c in cols_hist if c in df_display.columns]
 
         if cols_hist:
             st.write('Individual Histograms of Key Pollutants')
-            
-            # Determine grid size
+
             n_plots = len(cols_hist)
             n_rows = math.ceil(n_plots / 4)
             fig_indiv_hist, axes_indiv_hist = plt.subplots(n_rows, 4, figsize=(18, 5 * n_rows))
@@ -436,21 +489,19 @@ elif page == 'Exploratory Data Analysis':
                 ax.set_xlabel(col)
                 ax.set_ylabel("Count")
                 ax.grid(True, alpha=0.3)
-            
-            # Hide empty plots
+
             for j in range(len(cols_hist), len(axes_indiv_hist)):
                 axes_indiv_hist[j].axis("off")
 
             plt.tight_layout()
             st.pyplot(fig_indiv_hist)
-        
-        # 2. Skewness Analysis
+
         st.subheader('Feature Skewness Analysis')
         if not num_df.empty:
             skew = num_df.skew().sort_values(ascending=False)
             skew_df = pd.DataFrame(skew, columns=['Skewness'])
 
-            fig_skew, ax_skew = plt.subplots(figsize=(10, 6)) 
+            fig_skew, ax_skew = plt.subplots(figsize=(10, 6))
             sns.barplot(x=skew_df.index, y=skew_df['Skewness'],
                         edgecolor='black', linewidth=0.5, palette='viridis_r', ax=ax_skew)
 
@@ -462,19 +513,18 @@ elif page == 'Exploratory Data Analysis':
             plt.tight_layout()
             st.pyplot(fig_skew)
 
-        # 4. Histograms of All Numerical Features (Grid) - NOTE: This section is similar to the user's request, but kept for coherence in EDA 1
         st.subheader('Grid of All Numerical Features Distributions (EDA 1)')
         numerical_cols = df_display.select_dtypes(include=['float64', 'int64', 'int32']).columns.tolist()
         exclude_for_hist_eda1 = ['City_encoded', 'AQI_Bucket_encoded', 'Year']
         numerical_cols_for_hist_eda1 = [col for col in numerical_cols if col not in exclude_for_hist_eda1 and col not in ['Date', 'Day_of_Week', 'Month', 'Day']]
-        
+
         if numerical_cols_for_hist_eda1:
             n_plots = len(numerical_cols_for_hist_eda1)
             n_rows = math.ceil(n_plots / 4)
-            
+
             fig_grid_hist, axes_grid_hist = plt.subplots(n_rows, 4, figsize=(18, 4 * n_rows))
             axes_grid_hist = np.array(axes_grid_hist).flatten()
-            
+
             for i, col in enumerate(numerical_cols_for_hist_eda1):
                 ax = axes_grid_hist[i]
                 sns.histplot(df_display[col], kde=True, bins=30, ax=ax, color=sns.color_palette('magma')[i % 6])
@@ -482,19 +532,17 @@ elif page == 'Exploratory Data Analysis':
                 ax.set_xlabel(col)
                 ax.set_ylabel('Frequency')
 
-            # Hide empty plots
             for j in range(n_plots, len(axes_grid_hist)):
                 axes_grid_hist[j].axis("off")
-                
+
             plt.tight_layout(rect=[0, 0.03, 1, 0.98])
             plt.suptitle('Histograms of Numerical Features (EDA 1)', y=1.0, fontsize=18)
             st.pyplot(fig_grid_hist)
 
-        # 5. Box Plots of Key Pollutants vs. AQI Bucket
         st.subheader('Distribution of Key Pollutants by AQI Bucket')
         key_pollutants = [p for p in ['PM2.5', 'PM10', 'NO2', 'CO', 'O3'] if p in df_display.columns]
         aqi_order = ['good', 'satisfactory', 'moderate', 'poor', 'very poor', 'severe']
-        
+
         if key_pollutants:
             n_plots = len(key_pollutants)
             n_rows = math.ceil(n_plots / 3)
@@ -503,8 +551,8 @@ elif page == 'Exploratory Data Analysis':
 
             for i, col in enumerate(key_pollutants):
                 ax = axes_box[i]
-                sns.boxplot(x='AQI_Bucket', y=col, data=df_display, 
-                            order=[b for b in aqi_order if b in df_display['AQI_Bucket'].unique()], 
+                sns.boxplot(x='AQI_Bucket', y=col, data=df_display,
+                            order=[b for b in aqi_order if b in df_display['AQI_Bucket'].unique()],
                             ax=ax, palette='Spectral')
                 ax.set_title(f'Distribution of {col} by AQI Bucket')
                 ax.set_xlabel('AQI Bucket')
@@ -521,13 +569,12 @@ elif page == 'Exploratory Data Analysis':
 
 elif page == 'Exploratory Data Analysis 2':
     st.header('Exploratory Data Analysis 2: Custom Trends & Correlation 📈')
-    
-    # Calculate necessary variables for this page
+
     if 'AQI' in df_display.columns:
         sorted_mean_aqi = df_display.groupby('City')['AQI'].mean().sort_values(ascending=False)
     else:
         sorted_mean_aqi = pd.Series()
-    
+
     num_df = df_display.select_dtypes(include=['number']).copy()
     if num_df.shape[1] > 1:
         corr_matrix = num_df.corr()
@@ -535,9 +582,8 @@ elif page == 'Exploratory Data Analysis 2':
         corr_matrix = pd.DataFrame()
 
 
-    ## 1. Annual AQI Trend for Top 5 Cities
     st.subheader('1. Annual AQI Trend for Top 5 Cities')
-    
+
     if 'AQI' in df_display.columns and not sorted_mean_aqi.empty:
         top_5_cities = sorted_mean_aqi.head(5).index.tolist()
 
@@ -545,13 +591,11 @@ elif page == 'Exploratory Data Analysis 2':
 
         annual_aqi_top_cities = df_top_cities.groupby(['Year', 'City'])['AQI'].mean().reset_index()
 
-        # Plotting logic for Streamlit
         fig_trend, ax_trend = plt.subplots(figsize=(12, 7))
         sns.lineplot(x='Year', y='AQI', hue='City', data=annual_aqi_top_cities, marker='o', ax=ax_trend)
         ax_trend.set_title('Annual AQI Trend for Top 5 Cities', fontsize=16)
         ax_trend.set_xlabel('Year', fontsize=12)
         ax_trend.set_ylabel('Mean AQI', fontsize=12)
-        # Ensure ticks are integers representing years
         ax_trend.set_xticks(annual_aqi_top_cities['Year'].unique())
         ax_trend.grid(True, linestyle='--', alpha=0.6)
         ax_trend.legend(title='City')
@@ -559,16 +603,14 @@ elif page == 'Exploratory Data Analysis 2':
         st.pyplot(fig_trend)
     else:
         st.warning('AQI data is required to show Top 5 Cities trend.')
-    
-    
-    ## 2. Top 10 Cities by Mean AQI
+
+
     st.subheader('2. Top 10 Cities by Mean AQI')
 
     if 'AQI' in df_display.columns and not sorted_mean_aqi.empty:
         fig_top_cities, ax_top_cities = plt.subplots(figsize=(12, 6))
         top_10 = sorted_mean_aqi.head(10)
-        
-        # Use provided plotting code, adapted for Streamlit figure
+
         sns.barplot(x=top_10.index, y=top_10.values, hue=top_10.index, palette='viridis', legend=False, ax=ax_top_cities)
         ax_top_cities.set_title('Top 10 Cities by Mean AQI')
         ax_top_cities.set_xlabel('City')
@@ -578,24 +620,21 @@ elif page == 'Exploratory Data Analysis 2':
         st.pyplot(fig_top_cities)
     else:
         st.warning('AQI data is required to calculate and show the Top 10 Cities by Mean AQI.')
-    
-    
-    ## 3. Histograms of Numerical Features
+
+
     st.subheader('3. Histograms of Numerical Features')
-    
+
     numerical_cols = df_display.select_dtypes(include=['float64', 'int64', 'int32']).columns.tolist()
-    # Exclude encoded columns, 'Year', and temporal columns
     exclude_for_hist = ['City_encoded', 'AQI_Bucket_encoded', 'Year', 'Month', 'Day', 'Day_of_Week']
     numerical_cols_for_hist = [col for col in numerical_cols if col not in exclude_for_hist and col not in ['Date']]
-    
+
     if numerical_cols_for_hist:
         n_plots = len(numerical_cols_for_hist)
-        # Calculate optimal grid size 
         grid_size = math.ceil(math.sqrt(n_plots))
-        
+
         fig_hist_eda2, axes_hist_eda2 = plt.subplots(grid_size, grid_size, figsize=(18, 5 * grid_size))
         axes_hist_eda2 = np.array(axes_hist_eda2).flatten()
-        
+
         for i, col in enumerate(numerical_cols_for_hist):
             ax = axes_hist_eda2[i]
             sns.histplot(df_display[col], kde=True, bins=30, ax=ax, color=sns.color_palette('magma')[i % 6])
@@ -603,10 +642,9 @@ elif page == 'Exploratory Data Analysis 2':
             ax.set_xlabel(col)
             ax.set_ylabel('Frequency')
 
-        # Hide empty plots
         for j in range(n_plots, len(axes_hist_eda2)):
             axes_hist_eda2[j].axis("off")
-            
+
         plt.tight_layout(rect=[0, 0.03, 1, 0.98])
         plt.suptitle('Histograms of Numerical Features (EDA 2)', y=1.0, fontsize=18)
         st.pyplot(fig_hist_eda2)
@@ -614,69 +652,62 @@ elif page == 'Exploratory Data Analysis 2':
         st.warning('No suitable numerical columns found for histogram plotting.')
 
 
-    ## 4. Distribution of AQI Buckets (Pie Chart)
     st.subheader('4. Distribution of AQI Buckets (Pie Chart) 🥧')
     if 'AQI_Bucket' in df_display.columns:
         aqi_bucket_counts = df_display['AQI_Bucket'].value_counts()
         aqi_bucket_percentages = (aqi_bucket_counts / len(df_display)) * 100
 
         fig_pie, ax_pie = plt.subplots(figsize=(10, 8))
-        ax_pie.pie(aqi_bucket_percentages, labels=aqi_bucket_percentages.index, 
-                        autopct='%1.1f%%', startangle=90, 
-                        colors=sns.color_palette('viridis', len(aqi_bucket_percentages)),
-                        wedgeprops={'edgecolor': 'black', 'linewidth': 1})
+        ax_pie.pie(aqi_bucket_percentages, labels=aqi_bucket_percentages.index,
+                      autopct='%1.1f%%', startangle=90,
+                      colors=sns.color_palette('viridis', len(aqi_bucket_percentages)),
+                      wedgeprops={'edgecolor': 'black', 'linewidth': 1})
         ax_pie.set_title('Distribution of AQI Buckets')
-        ax_pie.axis('equal') # Equal aspect ratio ensures that pie is drawn as a circle.
+        ax_pie.axis('equal') 
         st.pyplot(fig_pie)
         st.dataframe(aqi_bucket_percentages.to_frame(name='Percentage (%)'))
         st.write('Pie chart showing the distribution of AQI Buckets has been generated.')
-        
+
     else:
         st.warning('The AQI_Bucket column is required to generate the Pie Chart.')
 
-    
-    ## 5. Highly Correlated Pollutant Pairs Analysis (Renumbered)
+
     st.subheader('5. Highly Correlated Pollutant Pairs Analysis')
 
     if not corr_matrix.empty:
         highly_correlated_pairs = []
-        
-        # Use only pollutant columns for correlation check
+
         pollutant_cols = [c for c in expected_numeric if c in corr_matrix.columns and c != 'AQI']
         corr_pollutants = corr_matrix.loc[pollutant_cols, pollutant_cols]
 
         for i in range(len(corr_pollutants.columns)):
             for j in range(i + 1, len(corr_pollutants.columns)):
                 corr_val = corr_pollutants.iloc[i, j]
-                if abs(corr_val) > 0.7: # Correlation threshold
+                if abs(corr_val) > 0.7: 
                     col1 = corr_pollutants.columns[i]
                     col2 = corr_pollutants.columns[j]
                     highly_correlated_pairs.append((col1, col2, corr_val))
 
         if highly_correlated_pairs:
             st.write("Highly correlated pollutant pairs (absolute correlation > 0.7):")
-            
-            # Display list of pairs
+
             for col1, col2, corr_val in highly_correlated_pairs:
                 st.write(f"- {col1} vs {col2}: {corr_val:.2f}")
 
             n_pairs = len(highly_correlated_pairs)
-            
-            # Use dynamic sizing for the scatter plot row
-            fig_scatter, axes_scatter = plt.subplots(1, n_pairs, figsize=(5 * n_pairs, 5)) 
-            
-            # Ensure axes_scatter is iterable when only one pair exists
+
+            fig_scatter, axes_scatter = plt.subplots(1, n_pairs, figsize=(5 * n_pairs, 5))
+
             if n_pairs == 1:
                 axes_scatter = [axes_scatter]
 
             for i, (col1, col2, corr_val) in enumerate(highly_correlated_pairs):
                 ax = axes_scatter[i]
-                # Use df_display for plotting
                 sns.scatterplot(x=df_display[col1], y=df_display[col2], ax=ax, color=sns.color_palette("deep")[i % 10])
                 ax.set_title(f'{col1} vs {col2} (Corr: {corr_val:.2f})')
                 ax.set_xlabel(col1)
                 ax.set_ylabel(col2)
-            
+
             plt.tight_layout(rect=[0, 0.03, 1, 0.9])
             plt.suptitle('Scatter Plots of Highly Correlated Pollutant Pairs', y=1.0, fontsize=16)
             st.pyplot(fig_scatter)
@@ -690,30 +721,24 @@ elif page == 'Modelling and Prediction':
     st.header('AQI Prediction and Model Evaluation 🔮')
     st.write('This section displays the performance metrics of the trained models (Decision Tree, Random Forest, and KNN) on the test dataset.')
 
-    # --- FIX: Dynamically load all fitted class names to avoid the size mismatch error ---
     try:
-        # LabelEncoder.classes_ holds all unique strings it was fitted on, sorted alphabetically,
-        # which correctly maps to the encoded integers 0, 1, 2, ...
         target_names_for_reporting = aqi_bucket_label_encoder.classes_
         st.info(f"Detected **{len(target_names_for_reporting)}** unique AQI classes for reporting: **{list(target_names_for_reporting)}**")
 
     except AttributeError:
         st.error("AQI Bucket Label Encoder could not be loaded or fitted. Cannot display model reports.")
         st.stop()
-    # --- END FIX ---
-    
+
     model_list = {
         'Decision Tree': dt_classifier,
         'Random Forest': rf_classifier,
         'K-Nearest Neighbors (KNN)': knn_classifier
     }
 
-    # --- NEW ADDITION: Overall Model Accuracy Comparison ---
     st.subheader('Overall Model Accuracy Comparison 📈')
 
     accuracy_data = {}
-    
-    # Calculate accuracy for all available models
+
     for model_name, model in model_list.items():
         if model is not None:
             try:
@@ -722,30 +747,25 @@ elif page == 'Modelling and Prediction':
                 accuracy_data[model_name] = accuracy
             except Exception as e:
                 st.warning(f"Could not calculate accuracy for {model_name}: {e}")
-                
+
     if accuracy_data:
         classification_metrics_df = pd.DataFrame(accuracy_data.values(), index=accuracy_data.keys(), columns=['Accuracy'])
-        
-        # 1. Bar chart for overall Accuracy
+
         fig_acc, ax_acc = plt.subplots(figsize=(8, 6))
-        # Ensure the palette is used correctly with the new Seaborn warning/structure if applicable
         sns.barplot(x=classification_metrics_df.index, y=classification_metrics_df['Accuracy'], palette='viridis', ax=ax_acc)
         ax_acc.set_title('Comparison of Model Accuracy', fontsize=16)
         ax_acc.set_xlabel('Model', fontsize=12)
         ax_acc.set_ylabel('Accuracy', fontsize=12)
-        ax_acc.set_ylim(0, 1) # Accuracy is between 0 and 1
+        ax_acc.set_ylim(0, 1) 
         ax_acc.grid(axis='y', linestyle='--', alpha=0.7)
-        
+
         st.pyplot(fig_acc)
         st.dataframe(classification_metrics_df)
-        st.write("Bar chart comparing model accuracy generated.")
         st.markdown('---')
     else:
         st.warning("No models are currently loaded or trained to compare accuracy.")
-    # --- END NEW ADDITION ---
 
 
-    # --- Model Evaluation Loop ---
     st.subheader('Detailed Model Evaluation Metrics on Test Set')
 
     for model_name, model in model_list.items():
@@ -753,167 +773,80 @@ elif page == 'Modelling and Prediction':
 
         if model is not None:
             try:
-                # Make predictions
                 y_pred = model.predict(X_test_app)
 
-                # --- 1. Classification Report ---
                 st.write('#### Classification Report')
-                # Use the full, dynamically loaded list of target names
                 report = classification_report(y_test_app, y_pred, target_names=target_names_for_reporting, output_dict=True)
-                
-                # Convert to DataFrame for better Streamlit viewing
+
                 report_df = pd.DataFrame(report).transpose().round(2)
                 st.dataframe(report_df)
-                
-                # --- 2. Confusion Matrix ---
+
                 st.write('#### Confusion Matrix')
                 fig_cm, ax_cm = plt.subplots(figsize=(8, 6))
                 cm = confusion_matrix(y_test_app, y_pred)
-                
-                # Plot Confusion Matrix using target_names
-                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
                             xticklabels=target_names_for_reporting, yticklabels=target_names_for_reporting, ax=ax_cm)
                 ax_cm.set_title(f'Confusion Matrix for {model_name}')
                 ax_cm.set_ylabel('True Label')
                 ax_cm.set_xlabel('Predicted Label')
-                plt.tight_layout()
+                
+
                 st.pyplot(fig_cm)
-                
-                # --- 3. Model Visualization (for Decision Tree only) ---
-                if model_name == 'Decision Tree':
-                    st.write('#### Decision Tree Visualization')
-                    st.info('The full tree might be complex. Adjust Max Depth for a simpler view.')
-                    
-                    # Provide an option to simplify the tree visualization
-                    dt_max_depth = dt_classifier.tree_.max_depth
-                    
-                    # Set max slider value to be reasonable for display, but not more than actual depth
-                    max_slider_val = min(dt_max_depth, 5) 
 
-                    max_depth = st.slider(
-                        'Max Depth for Visualization', 
-                        1, 
-                        dt_max_depth, 
-                        max_slider_val, 
-                        key='dt_depth'
-                    )
-                    
-                    fig_tree, ax_tree = plt.subplots(figsize=(20, 10))
-                    # Only plot the tree if it's small enough or depth is restricted
-                    if dt_classifier.tree_.node_count < 50 or max_depth < dt_classifier.tree_.max_depth:
-                        plot_tree(dt_classifier, 
-                                          feature_names=X_cols,
-                                          class_names=target_names_for_reporting.tolist(),
-                                          filled=True,
-                                          rounded=True,
-                                          ax=ax_tree,
-                                          max_depth=max_depth
-                                          )
-                        ax_tree.set_title(f'Decision Tree Visualization (Max Depth: {max_depth})')
-                        plt.tight_layout()
-                        st.pyplot(fig_tree)
-                    else:
-                        st.warning(f"Tree is too large ({dt_classifier.tree_.node_count} nodes) for full visualization. Use the slider to set Max Depth less than {dt_max_depth} for a plot.")
-                        
-                # --- 4. Prediction Interface (Simple) ---
-                st.write('#### Make a Prediction')
-                
-                # Select City for Prediction
-                unique_cities = sorted(df_display['City'].unique())
-                city_to_predict = st.selectbox('Select City', unique_cities, key=f'{model_name}_city')
-                
-                # Prepare feature inputs for prediction (sliders for scaled features are complex, so use simplified mean values or direct input for demonstration)
-                
-                # Collect Pollutant Inputs (using medians as placeholders for min/max logic)
-                input_data = {}
-                st.write('Input Pollutant Concentrations:')
-                
-                cols1, cols2, cols3 = st.columns(3)
-                all_pollutants = [c for c in expected_numeric if c in X_cols and c != 'AQI']
-                
-                for i, col in enumerate(all_pollutants):
-                    container = [cols1, cols2, cols3][i % 3]
-                    # Use the whole dataset min/max for the slider range
-                    min_val = df_display[col].min()
-                    max_val = df_display[col].max()
-                    mean_val = df_display[col].mean()
-                    
-                    input_data[col] = container.number_input(
-                        f'{col}', 
-                        min_value=float(min_val), 
-                        max_value=float(max_val), 
-                        value=float(mean_val), 
-                        step=1.0, 
-                        format="%.2f",
-                        key=f'{model_name}_{col}'
-                    )
-                
-                # Set temporal features to current date for a reasonable default
-                current_date = datetime.now()
-                input_data['Year'] = current_date.year
-                input_data['Month'] = current_date.month
-                input_data['Day'] = current_date.day
-                input_data['Day_of_Week'] = current_date.weekday() # Monday=0, Sunday=6
-
-                # Encode City
-                try:
-                    input_data['City_encoded'] = city_label_encoder.transform([city_to_predict])[0]
-                except ValueError:
-                    st.warning(f"City '{city_to_predict}' not seen during training. Using mean city encoding.")
-                    input_data['City_encoded'] = df_display['City_encoded'].mean()
-                
-                # Prepare final dataframe for prediction (must match X_cols order)
-                pred_df = pd.DataFrame([input_data])[X_cols]
-                
-                # Scale numerical features
-                pred_scaled = pred_df.copy()
-                if numerical_pollutant_cols_app:
-                    pred_scaled[numerical_pollutant_cols_app] = scaler.transform(pred_scaled[numerical_pollutant_cols_app])
-
-                if st.button(f'Predict AQI Bucket with {model_name}', key=f'{model_name}_predict_btn'):
-                    final_prediction_encoded = model.predict(pred_scaled)[0]
-                    final_prediction_label = aqi_bucket_label_encoder.inverse_transform([final_prediction_encoded])[0]
-                    
-                    st.success(f"**Predicted AQI Bucket for {city_to_predict}:** **{final_prediction_label.upper()}**")
-                    
             except Exception as e:
-                st.error(f"Error during {model_name} evaluation or visualization: {e}")
+                st.error(f"Error evaluating {model_name}: {e}")
         else:
-            st.warning(f"The **{model_name}** model is not loaded or has not been trained. Check the sidebar option.")
-        
-        st.markdown('---')
+            st.warning(f"The {model_name} model is not loaded or trained.")
 
+# -------------------------
+# Model Visualization Page 
+# -------------------------
+elif page == 'Model Visualization':
+    st.header('Model Visualization: Decision Tree 🌳')
+    st.write('Visualizing the structure of the trained Decision Tree for interpretability.')
 
-    # --- Download Preprocessors and Models ---
-    st.subheader('Download Assets 💾')
-    
-    # Helper to convert joblib object to bytes
-    def get_joblib_download_link(model_object, filename):
-        buffer = io.BytesIO()
-        joblib.dump(model_object, buffer)
-        buffer.seek(0)
-        return st.download_button(
-            label=f"Download {filename}",
-            data=buffer.getvalue(),
-            file_name=filename,
-            mime='application/octet-stream',
-            key=f'download_{filename}'
-        )
-
-    download_cols = st.columns(6)
-    
-    # Download Models
     if dt_classifier is not None:
-        with download_cols[0]: get_joblib_download_link(dt_classifier, 'decision_tree_model.joblib')
-    if rf_classifier is not None:
-        with download_cols[1]: get_joblib_download_link(rf_classifier, 'random_forest_model.joblib')
-    if knn_classifier is not None:
-        with download_cols[2]: get_joblib_download_link(knn_classifier, 'knn_model.joblib')
+        try:
+            max_depth = dt_classifier.get_depth()
+            
+            selected_depth = st.slider(
+                'Select Max Depth for Visualization (Controls Image Size/Detail)',
+                min_value=1,
+                max_value=max_depth,
+                value=min(max_depth, 3) 
+            )
+            
+            st.write(f"Displaying Decision Tree up to depth **{selected_depth}** of total depth **{max_depth}**.")
+            
+            feature_names = X_cols
+            class_names = aqi_bucket_label_encoder.classes_.tolist() 
+            
+            fig_dt, ax_dt = plt.subplots(figsize=(selected_depth * 6, selected_depth * 4)) 
 
-    # Download Preprocessors
-    if scaler is not None:
-        with download_cols[3]: get_joblib_download_link(scaler, 'scaler.joblib')
-    if city_label_encoder is not None:
-        with download_cols[4]: get_joblib_download_link(city_label_encoder, 'city_label_encoder.joblib')
-    if aqi_bucket_label_encoder is not None:
-        with download_cols[5]: get_joblib_download_link(aqi_bucket_label_encoder, 'aqi_bucket_label_encoder.joblib')
+            plot_tree(
+                dt_classifier, 
+                max_depth=selected_depth, 
+                feature_names=feature_names, 
+                class_names=class_names, 
+                filled=True, 
+                rounded=True, 
+                proportion=False, 
+                fontsize=10,
+                ax=ax_dt
+            )
+            
+            ax_dt.set_title(f'Decision Tree Classifier (Max Depth: {selected_depth})', fontsize=20)
+            
+
+[Image of decision tree structure]
+
+            
+            st.pyplot(fig_dt)
+            st.markdown('---')
+            st.markdown(f"**Interpretation Note:** Each node shows the splitting condition, the Gini impurity, the number of samples in the node, and the class distribution (`value`). The predicted class (`class`) is the one with the highest count in the `value` list.")
+            
+        except Exception as e:
+            st.error(f"Error visualizing Decision Tree: {e}. Please ensure the model is trained and relevant features exist.")
+    else:
+        st.warning('The Decision Tree model is not loaded or trained. Please go to the sidebar and check the "Train / retrain models now" option.')
